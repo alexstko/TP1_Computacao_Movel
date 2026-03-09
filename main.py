@@ -5,6 +5,7 @@ import flet as ft
 from sympy import sympify, N, sqrt, log, sin, pi
 import duckdb
 
+
 # ── Base de dados DuckDB ──────────────────────────────────────────────────────
 DB_PATH = "history.parquet"
 DUCK_DB = "history.db"
@@ -250,7 +251,6 @@ class CalculatorApp(ft.Container):
         )
 
     def load_history(self, page: ft.Page):
-        """Carrega histórico do DuckDB."""
         entries = load_from_db()
         for entry in entries:
             if entry["index"] > self._history_counter:
@@ -264,8 +264,7 @@ class CalculatorApp(ft.Container):
             )
             self.history_list.controls.append(item)
 
-    def save_history(self, page: ft.Page = None):
-        """Guarda histórico no DuckDB e exporta para Parquet."""
+    def save_history(self):
         entries = []
         for item in self.history_list.controls:
             entries.append({
@@ -291,10 +290,8 @@ class CalculatorApp(ft.Container):
             on_delete=self.delete_history_entry,
         )
         self.history_list.controls.insert(0, entry)
-
         if len(self.history_list.controls) > 10:
             self.history_list.controls.pop()
-
         self.save_history()
 
     def delete_history_entry(self, entry: HistoryEntry):
