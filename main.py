@@ -3,6 +3,47 @@ from datetime import datetime
 from typing import Callable
 import flet as ft
 from sympy import sympify, N, sqrt, log, sin, pi
+import duckdb
+
+# ── Base de dados DuckDB ──────────────────────────────────────────────────────
+DB_PATH = "history.parquet"
+DUCK_DB = "history.db"
+
+
+def init_db():
+    con = duckdb.connect(DUCK_DB)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS history (
+            index INTEGER,
+            timestamp TEXT,
+            expression TEXT,
+            result TEXT
+        )
+    """)
+    con.close()
+
+
+def save_to_db(entries: list):
+    con = duckdb.connect(DUCK_DB)
+    con.execute("DELETE FROM history")
+    for entry in entries:
+        con.execute(
+            "INSERT INTO history VALUES (?, ?, ?, ?)",
+            [entry["index"], entry["timestamp"], entry["expression"], entry["result"]]
+        )
+    con.execute(f"COPY history TO '{DB_PATH}' (FORMAT PARQUET)")
+    con.close()
+
+
+def load_from_db() -> list:
+    con = duckdb.connect(DUCK_DB)
+    try:
+        rows = con.execute("SELECT * FROM history ORDER BY index DESC").fetchall()
+        return [{"index": r[0], "timestamp": r[1], "expression": r[2], "result": r[3]} for r in rows]
+    except Exception:
+        return []
+    finally:
+        con.close()
 
 
 # ── Classe que representa um elemento do histórico ────────────────────────────
@@ -188,7 +229,6 @@ class CalculatorApp(ft.Container):
                         ActionButton(content="=", on_click=self.button_clicked),
                     ]
                 ),
-                # Botão histórico
                 ft.Row(
                     controls=[
                         ft.Button(
@@ -209,6 +249,33 @@ class CalculatorApp(ft.Container):
             ]
         )
 
+    def load_history(self, page: ft.Page):
+        """Carrega histórico do DuckDB."""
+        entries = load_from_db()
+        for entry in entries:
+            if entry["index"] > self._history_counter:
+                self._history_counter = entry["index"]
+            item = HistoryEntry(
+                index=entry["index"],
+                timestamp=entry["timestamp"],
+                expression=entry["expression"],
+                result=entry["result"],
+                on_delete=self.delete_history_entry,
+            )
+            self.history_list.controls.append(item)
+
+    def save_history(self, page: ft.Page = None):
+        """Guarda histórico no DuckDB e exporta para Parquet."""
+        entries = []
+        for item in self.history_list.controls:
+            entries.append({
+                "index": item.index,
+                "timestamp": item.timestamp,
+                "expression": item.expression,
+                "result": item.result,
+            })
+        save_to_db(entries)
+
     def toggle_history(self, e):
         self.show_history = not self.show_history
         self.history_list.visible = self.show_history
@@ -225,12 +292,14 @@ class CalculatorApp(ft.Container):
         )
         self.history_list.controls.insert(0, entry)
 
-        # Máximo 10 elementos
         if len(self.history_list.controls) > 10:
             self.history_list.controls.pop()
 
+        self.save_history()
+
     def delete_history_entry(self, entry: HistoryEntry):
         self.history_list.controls.remove(entry)
+        self.save_history()
         self.update()
 
     def format_with_thousands(self, value_str):
@@ -361,8 +430,11 @@ class CalculatorApp(ft.Container):
 
 def main(page: ft.Page):
     page.title = "Calc App"
+    init_db()
     calc = CalculatorApp()
     page.add(calc)
+    calc.load_history(page)
+    calc.update()
 
 
 ft.run(main)
