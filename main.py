@@ -1,8 +1,71 @@
 from dataclasses import field
+from datetime import datetime
+from typing import Callable
 import flet as ft
 from sympy import sympify, N, sqrt, log, sin, pi
 
 
+# ── Classe que representa um elemento do histórico ────────────────────────────
+@ft.control
+class HistoryEntry(ft.Column):
+    index: int = 0
+    timestamp: str = ""
+    expression: str = ""
+    result: str = ""
+    on_delete: Callable[["HistoryEntry"], None] = field(default=lambda entry: None)
+
+    def __init__(self, index, timestamp, expression, result, on_delete):
+        super().__init__()
+        self.index = index
+        self.timestamp = timestamp
+        self.expression = expression
+        self.result = result
+        self.on_delete = on_delete
+
+        self.controls = [
+            ft.Container(
+                bgcolor=ft.Colors.BLUE_GREY_900,
+                border_radius=10,
+                padding=10,
+                margin=ft.Margin(0, 0, 0, 6),
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Text(f"#{self.index}", color=ft.Colors.BLUE_GREY_400, size=12),
+                                ft.Text(self.timestamp, color=ft.Colors.BLUE_GREY_400, size=12),
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        ),
+                        ft.Text(
+                            self.expression + " =",
+                            color=ft.Colors.WHITE_54,
+                            size=13,
+                        ),
+                        ft.Row(
+                            controls=[
+                                ft.Text(
+                                    self.result,
+                                    color=ft.Colors.WHITE,
+                                    size=18,
+                                    weight=ft.FontWeight.BOLD,
+                                    expand=True,
+                                ),
+                                ft.IconButton(
+                                    icon=ft.Icons.DELETE,
+                                    icon_color=ft.Colors.RED_400,
+                                    tooltip="Apagar",
+                                    on_click=lambda e: self.on_delete(self),
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            )
+        ]
+
+
+# ── Botões ────────────────────────────────────────────────────────────────────
 @ft.control
 class CalcButton(ft.Button):
     expand: int = field(default_factory=lambda: 1)
@@ -10,7 +73,7 @@ class CalcButton(ft.Button):
 
 @ft.control
 class DigitButton(CalcButton):
-    bgcolor: ft.Colors = ft.Colors.WHITE24
+    bgcolor: ft.Colors = ft.Colors.WHITE_24
     color: ft.Colors = ft.Colors.WHITE
 
 
@@ -32,11 +95,14 @@ class MathButton(CalcButton):
     color: ft.Colors = ft.Colors.WHITE
 
 
+# ── App principal ─────────────────────────────────────────────────────────────
 @ft.control
 class CalculatorApp(ft.Container):
     def __init__(self):
         super().__init__()
         self.reset()
+        self._history_counter = 0
+        self.show_history = False
         self.width = 400
         self.bgcolor = ft.Colors.BLACK
         self.border_radius = ft.BorderRadius.all(20)
@@ -44,7 +110,7 @@ class CalculatorApp(ft.Container):
 
         self.expression_display = ft.Text(
             value="",
-            color=ft.Colors.WHITE54,
+            color=ft.Colors.WHITE_54,
             size=16,
             text_align=ft.TextAlign.RIGHT,
         )
@@ -56,12 +122,17 @@ class CalculatorApp(ft.Container):
             text_align=ft.TextAlign.RIGHT,
         )
 
+        self.history_list = ft.Column(
+            controls=[],
+            visible=False,
+            scroll=ft.ScrollMode.AUTO,
+            height=300,
+        )
+
         self.content = ft.Column(
             controls=[
                 ft.Row(controls=[self.expression_display], alignment=ft.MainAxisAlignment.END),
                 ft.Row(controls=[self.result], alignment=ft.MainAxisAlignment.END),
-
-                # Linha 1: botões matemáticos extra
                 ft.Row(
                     controls=[
                         MathButton(content="√", on_click=self.button_clicked),
@@ -70,8 +141,6 @@ class CalculatorApp(ft.Container):
                         MathButton(content="log", on_click=self.button_clicked),
                     ]
                 ),
-
-                # Linha 2: AC, CE, ⬅, /
                 ft.Row(
                     controls=[
                         ExtraActionButton(content="AC", on_click=self.button_clicked),
@@ -80,8 +149,6 @@ class CalculatorApp(ft.Container):
                         ActionButton(content="/", on_click=self.button_clicked),
                     ]
                 ),
-
-                # Linha 3: (, ), %, *
                 ft.Row(
                     controls=[
                         ExtraActionButton(content="(", on_click=self.button_clicked),
@@ -90,8 +157,6 @@ class CalculatorApp(ft.Container):
                         ActionButton(content="*", on_click=self.button_clicked),
                     ]
                 ),
-
-                # Linha 4
                 ft.Row(
                     controls=[
                         DigitButton(content="7", on_click=self.button_clicked),
@@ -100,8 +165,6 @@ class CalculatorApp(ft.Container):
                         ActionButton(content="-", on_click=self.button_clicked),
                     ]
                 ),
-
-                # Linha 5
                 ft.Row(
                     controls=[
                         DigitButton(content="4", on_click=self.button_clicked),
@@ -110,8 +173,6 @@ class CalculatorApp(ft.Container):
                         ActionButton(content="+", on_click=self.button_clicked),
                     ]
                 ),
-
-                # Linha 6
                 ft.Row(
                     controls=[
                         DigitButton(content="1", on_click=self.button_clicked),
@@ -120,8 +181,6 @@ class CalculatorApp(ft.Container):
                         ActionButton(content="+/-", on_click=self.button_clicked),
                     ]
                 ),
-
-                # Linha 7
                 ft.Row(
                     controls=[
                         DigitButton(content="0", expand=2, on_click=self.button_clicked),
@@ -129,21 +188,66 @@ class CalculatorApp(ft.Container):
                         ActionButton(content="=", on_click=self.button_clicked),
                     ]
                 ),
+                # Botão histórico
+                ft.Row(
+                    controls=[
+                        ft.Button(
+                            content=ft.Row(
+                                controls=[
+                                    ft.Icon(ft.Icons.HISTORY, color=ft.Colors.WHITE),
+                                    ft.Text("Histórico", color=ft.Colors.WHITE),
+                                ],
+                                alignment=ft.MainAxisAlignment.CENTER,
+                            ),
+                            bgcolor=ft.Colors.BLUE_GREY_800,
+                            expand=True,
+                            on_click=self.toggle_history,
+                        )
+                    ]
+                ),
+                self.history_list,
             ]
         )
 
+    def toggle_history(self, e):
+        self.show_history = not self.show_history
+        self.history_list.visible = self.show_history
+        self.update()
+
+    def add_to_history(self, expression: str, result: str):
+        self._history_counter += 1
+        entry = HistoryEntry(
+            index=self._history_counter,
+            timestamp=datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            expression=expression,
+            result=result,
+            on_delete=self.delete_history_entry,
+        )
+        self.history_list.controls.insert(0, entry)
+
+        # Máximo 10 elementos
+        if len(self.history_list.controls) > 10:
+            self.history_list.controls.pop()
+
+    def delete_history_entry(self, entry: HistoryEntry):
+        self.history_list.controls.remove(entry)
+        self.update()
+
     def format_with_thousands(self, value_str):
-        """Formata número com espaço como separador de milhares."""
         try:
             num = float(str(value_str).replace(" ", ""))
             if num % 1 == 0:
-                num = int(num)
-                return "{:,}".format(num).replace(",", " ")
+                return "{:,}".format(int(num)).replace(",", " ")
             else:
                 formatted = "{:,.10f}".format(num).replace(",", " ").rstrip("0")
-                return formatted if "." in formatted else formatted
+                return formatted
         except Exception:
             return value_str
+
+    def format_number(self, num):
+        if num % 1 == 0:
+            return int(num)
+        return round(num, 10)
 
     def button_clicked(self, e):
         data = e.control.content
@@ -158,10 +262,7 @@ class CalculatorApp(ft.Container):
 
         elif data == "⬅":
             raw = self.result.value.replace(" ", "")
-            if len(raw) > 1:
-                self.result.value = self.format_with_thousands(raw[:-1])
-            else:
-                self.result.value = "0"
+            self.result.value = self.format_with_thousands(raw[:-1]) if len(raw) > 1 else "0"
 
         elif data in ("1","2","3","4","5","6","7","8","9","0","."):
             raw = self.result.value.replace(" ", "")
@@ -178,10 +279,7 @@ class CalculatorApp(ft.Container):
             self.new_operand = True
 
         elif data in ("(", ")"):
-            if self.result.value == "0":
-                self.result.value = data
-            else:
-                self.result.value = self.result.value + data
+            self.result.value = data if self.result.value == "0" else self.result.value + data
             self.new_operand = False
 
         elif data == "=":
@@ -189,7 +287,9 @@ class CalculatorApp(ft.Container):
             full_expression = self.expression + raw
             self.expression_display.value = full_expression + " ="
             result = self.calculate_expression(full_expression)
-            self.result.value = self.format_with_thousands(str(result))
+            result_str = self.format_with_thousands(str(result))
+            self.add_to_history(full_expression, result_str)
+            self.result.value = result_str
             self.reset()
 
         elif data == "%":
@@ -209,8 +309,11 @@ class CalculatorApp(ft.Container):
                 self.result.value = "Error"
             else:
                 result = float(N(sqrt(raw), 10))
-                self.expression_display.value = f"√({int(raw) if raw % 1 == 0 else raw}) ="
-                self.result.value = self.format_with_thousands(str(self.format_number(result)))
+                expr = f"√({int(raw) if raw % 1 == 0 else raw})"
+                result_str = self.format_with_thousands(str(self.format_number(result)))
+                self.expression_display.value = expr + " ="
+                self.add_to_history(expr, result_str)
+                self.result.value = result_str
 
         elif data == "xʸ":
             raw = self.result.value.replace(" ", "")
@@ -222,8 +325,11 @@ class CalculatorApp(ft.Container):
         elif data == "sin":
             raw = float(self.result.value.replace(" ", ""))
             result = float(N(sin(raw * pi / 180), 10))
-            self.expression_display.value = f"sin({int(raw) if raw % 1 == 0 else raw}°) ="
-            self.result.value = self.format_with_thousands(str(self.format_number(result)))
+            expr = f"sin({int(raw) if raw % 1 == 0 else raw}°)"
+            result_str = self.format_with_thousands(str(self.format_number(result)))
+            self.expression_display.value = expr + " ="
+            self.add_to_history(expr, result_str)
+            self.result.value = result_str
 
         elif data == "log":
             raw = float(self.result.value.replace(" ", ""))
@@ -231,8 +337,11 @@ class CalculatorApp(ft.Container):
                 self.result.value = "Error"
             else:
                 result = float(N(log(raw, 10), 10))
-                self.expression_display.value = f"log({int(raw) if raw % 1 == 0 else raw}) ="
-                self.result.value = self.format_with_thousands(str(self.format_number(result)))
+                expr = f"log({int(raw) if raw % 1 == 0 else raw})"
+                result_str = self.format_with_thousands(str(self.format_number(result)))
+                self.expression_display.value = expr + " ="
+                self.add_to_history(expr, result_str)
+                self.result.value = result_str
 
         self.update()
 
@@ -242,12 +351,6 @@ class CalculatorApp(ft.Container):
             return self.format_number(float(result))
         except Exception:
             return "Error"
-
-    def format_number(self, num):
-        if num % 1 == 0:
-            return int(num)
-        else:
-            return round(num, 10)
 
     def reset(self):
         self.operator = "+"
@@ -262,4 +365,4 @@ def main(page: ft.Page):
     page.add(calc)
 
 
-ft.app(target=main)
+ft.run(main)
